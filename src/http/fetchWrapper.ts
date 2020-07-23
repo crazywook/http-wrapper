@@ -1,132 +1,286 @@
+import { RequestResponse, ResponseCode } from './types'
 import qs from 'qs'
 import {
-  HttpInterface, HttpMethod, ContentType,
-  HttpRequestInfo,
+  HttpInterface,
+  HttpMethod,
+  ContentType,
+  HttpRequestOptions,
 } from './types'
 
-type HeadersInit = Headers | string[][] | { [key: string]: string };
-
-interface Headers extends Iterable<[string, string]> {
-    forEach(callback: (value: string, name: string) => void): void;
-    append(name: string, value: string): void;
-    delete(name: string): void;
-    get(name: string): string | null;
-    has(name: string): boolean;
-    raw(): { [k: string]: string[] };
-    set(name: string, value: string): void;
+type plain = string | number | null
+type Data = {
+  [index: string]: plain | {}
 }
 
-interface HeadersConstructor {
-  new (init: HeadersInit): Headers
+function convertToFormData(data : {[index: string]: any }) {
+
+  const formData: FormData = new FormData()
+
+  Object.keys(data).forEach(key => {
+
+    if (data[key] instanceof Array) {
+      data[key].forEach((nData: Object) => {
+
+        if (nData instanceof File || typeof nData === 'string' ) {
+          formData.append(key, nData)
+          return
+        }
+        formData.append(key, JSON.stringify(nData))
+      })
+
+    } else {
+      formData.append(key, data[key])
+    }
+  })
+
+  return formData
 }
 
 export default class FetchWrapper implements HttpInterface {
 
-  private fetch: any
-  private Headers: any
-
-  constructor(
-    readonly host: string
-  ) {
-    this.fetch = typeof fetch === 'undefined'
-      ? require('node-fetch')
-      : window.fetch
-    this.Headers = typeof Headers === 'undefined'
-      ? this.fetch.Headers
-      : window.Headers
-  }
-
-  getDefaultRequestInitByMethod(method: HttpMethod, Headers: HeadersConstructor) {
-
+  static getDefaultRequestInitBy({
+    method,
+    headers,
+  }: {
+    method: HttpMethod | string,
+    headers?: {
+      contentType: string
+    }
+  }) {
     return {
       method,
       headers: new Headers({
-        'Content-Type': 'application/json'
+        'Content-Type': headers?.contentType || ContentType.JSON
       }),
     }
   }
 
-  get(
-    url: string,
-    requestData?: HttpRequestInfo,
-  ): Promise<any> {
+  constructor(
+    readonly host: string
+  ) {}
 
-    const requestInit = this.getDefaultRequestInitByMethod(HttpMethod.GET, this.Headers)
+  createFullUrl(url: string): string {
+    return `${this.host}${url}`
+  }
 
-    if (!requestData || !requestData.data || !requestData.contentType) {
-      return this.request(url, requestInit)
+  createFullUrlIncludedQueryParam(url: string, queryParam?: string): string {
+    return `${this.host}${url}?${queryParam}`
+  }
+
+  get<T>(request: HttpRequestOptions): RequestResponse<T>;
+  get<T>(url: string, data?: Data): RequestResponse<T>;
+  get<T>(
+    ...arg: any
+  ): RequestResponse<T> {
+
+    if (typeof arg[0] === 'string') {
+
+      return this.getBiparam<T>(arg[0], arg[1])
+    }
+    if (arg[1]) {
+      console.error('Expected 1 argument but 2 or more')
+      throw new Error('')
+    }
+    if (typeof arg[0] === 'object') {
+
+      return this.getUniparam<T>(arg[0])
+    }
+    throw new Error('Cannot support arguments')
+  }
+  private getUniparam<T>(request: HttpRequestOptions): RequestResponse<T> {
+
+    const requestInit = FetchWrapper.getDefaultRequestInitBy({
+      method: HttpMethod.GET,
+      headers: request.headers,
+    })
+    request.headers.contentType && requestInit.headers.set('Content-Type', request.headers.contentType)
+
+    const fullUrl = this.createFullUrl(request.url)
+
+    if (!request.data) {
+      return this.request<T>(fullUrl, requestInit)
     }
 
-    requestInit.headers.set('Content-Type', requestData.contentType)
+    const queryParam = qs.stringify(request.data)
 
-    const queryParam = qs.stringify(requestData.data)
+    return this.request<T>(
+      `${fullUrl}?${queryParam}`,
+      requestInit,
+    )
+  }
+  private getBiparam<T>(url: string, data?: Data): RequestResponse<T> {
+
+    const requestInit = FetchWrapper.getDefaultRequestInitBy({
+      method: HttpMethod.GET
+    })
+    const fullUrl = this.createFullUrl(url)
+
+    if (!data) {
+      return this.request(fullUrl, requestInit)
+    }
+
+    const queryParam = qs.stringify(data)
 
     return this.request(
-      `${this.host}/${url}/${queryParam}`,
+      `${fullUrl}?${queryParam}`,
       requestInit,
     )
   }
 
-  async post(url: string, requestData?: HttpRequestInfo) {
+  post<T = any>(request: HttpRequestOptions): RequestResponse<T>
+  post<T = any>(
+    url: string,
+    requestInfo?: Data,
+  ): RequestResponse<T>
+  post<T = any>(...arg: any): RequestResponse<T> {
 
-    const requestInit = this.getDefaultRequestInitByMethod(HttpMethod.POST, this.Headers)
+    if (typeof arg[0] === 'string') {
 
-    if (!requestData) {
-      return 
+      return this.postBiparam<T>(arg[0], arg[1])
+    }
+    if (arg[1]) {
+      console.error('Expected 1 argument but 2 or more')
+      throw new Error('Expected 1 argument but 2 or more')
+    }
+    if (typeof arg[0] === 'object') {
+
+      return this.postUniparam<T>(arg[0])
+    }
+    throw new Error('first argument must be string or object')
+  }
+  private postUniparam<T = any>(request: HttpRequestOptions): RequestResponse<T> {
+
+    const requestInit = FetchWrapper.getDefaultRequestInitBy({
+      method: HttpMethod.POST,
+      headers: request.headers,
+    })
+
+    return this.request<T>(
+      this.createFullUrl(request.url),
+      {
+        ...requestInit,
+        data: request.data,
+      },
+    )
+  }
+  private async postBiparam<T = any>(url: string, data: Data): RequestResponse<T> {
+
+    const requestInit = FetchWrapper.getDefaultRequestInitBy({
+      method: HttpMethod.POST,
+    })
+
+    return this.request<T>(
+      this.createFullUrl(url),
+      {
+        ...requestInit,
+        data
+      }
+    )
+  }
+
+  delete<T = any>(url: string, requestData?: Data): RequestResponse<T> {
+
+    const requestInit = FetchWrapper.getDefaultRequestInitBy({
+      method: HttpMethod.DELETE,
+    })
+
+    return this.request<T>(
+      this.createFullUrl(url),
+      requestInit
+    )
+  }
+
+  put<T = any>(url: string, data?: Data): RequestResponse<T> {
+
+    const requestInit = FetchWrapper.getDefaultRequestInitBy({
+      method: HttpMethod.PUT
+    })
+
+    return this.request<T>(
+      this.createFullUrl(url),
+      {
+        ...requestInit,
+        data,
+      }
+    )
+  }
+
+  request<T = any>(url: string, init: RequestInit & { data?: { [index: string]: any } }): RequestResponse<T> {
+
+    const { data } = init
+
+    if (!data) {
+      return fetch(url, {
+        ...init,
+      }).then(this.processResponse)
+      .catch((e: any) => ({
+          code: e.status,
+          message: e.message,
+          data: [] as unknown as T
+        })
+      )
     }
 
-    return this.request(url, {
-      ...requestInit,
-      body: JSON.stringify(requestData.data)
-    })
-  }
+    const contentType = (init.headers as Headers)?.get('content-type')
 
-  delete(url: string, requestData?: HttpRequestInfo): Promise<any> {
+    if (contentType === ContentType.MULTIPART) {
 
-    const requestInit = this.getDefaultRequestInitByMethod(HttpMethod.DELETE, this.Headers)
+      const formData = convertToFormData(data)
 
-    return this.request(url, requestInit)
-  }
-
-  put(url: string, requestData?: HttpRequestInfo): Promise<any> {
-
-    const requestInit = this.getDefaultRequestInitByMethod(HttpMethod.PUT, this.Headers)
-
-    return this.request(url, requestInit)
-  }
-
-  request(url: string, init: any) {
-  // request(url: string, init: RequestInit & { data?: { [index: string]: any } }) {
-
-    if (!init.data) {
-      return this.fetch(url, {
+      const options = {
         ...init,
-      }).then((r: Response) => {
+        method: init.method,
+        headers: new Headers({}),
+        body: formData,
+      }
 
-        const contentType = r.headers.get('Content-Type')
-        console.log('contentType', contentType)
-        if (!contentType || !contentType.includes('application/json')) {
-          return r
+      return fetch(
+        url,
+        options,
+      ).then(this.processResponse)
+      .catch((e: any) => {
+        console.log('error', e)
+        return {
+          code: e.status,
+          message: e.message,
+          data: [] as unknown as T
         }
-        
-        return r.json()
       })
     }
 
-    return this.fetch(url, {
-      ...init,
-      body: JSON.stringify(init.data)
-    }).then((r: Response) => {
+    return fetch(
+      url,
+      {
+        ...init,
+        body: JSON.stringify(init.data)
+      }).then(this.processResponse)
+      .catch((e: any) => ({
+          code: e.status,
+          message: e.message,
+          data: [] as unknown as T
+        })
+      )
+  }
 
-      const contentType = r.headers.get('Content-Type')
-      console.log('contentType', contentType)
-      if (!contentType || !contentType.includes('application/json')) {
-       return r
-     }
-      
-      return r.json()
-    })
+  async processResponse<T = any>(r: Response): RequestResponse<T> {
+
+    const contentType = r.headers.get('Content-Type')
+
+    // If you use NGINX, following show file limit error
+    // if (!contentType?.includes('application/json')) {
+    //   const text = await r.text()
+    //   console.log('text', text)
+    //   const match = text.match(/<title>(.*)<\/title>/)
+    //   if (!match) {
+    //     return {} as any
+    //   }
+    //   return {
+    //     code: ResponseCode.TOO_LARGE_LENGTH,
+    //     data: null,
+    //     message: match[1],
+    //   }
+    // }
+
+    return r.json()
   }
 }
-
-// mocha 
