@@ -7,9 +7,9 @@ import {
   HttpRequestOptions,
 } from './types'
 
-type plain = string | number | null
+type plain = string | number
 type Data = {
-  [index: string]: plain | {}
+  [index: string]: plain | null | undefined | {}
 }
 
 function convertToFormData(data : {[index: string]: any }) {
@@ -134,24 +134,29 @@ export default class FetchWrapper implements HttpInterface {
   ): RequestResponse<T>
   post<T = any>(...arg: any): RequestResponse<T> {
 
-    if (typeof arg[0] === 'string') {
+    return this.processPostOverloading<T>(...arg, HttpMethod.POST)
+  }
+  processPostOverloading<T = any>(...arg: any): RequestResponse<T> {
 
-      return this.postBiparam<T>(arg[0], arg[1])
+    if (typeof arg[0] === 'string' && arg[1]) {
+
+      if (typeof arg[1] !== 'object') {
+        return this.postBiparamType<T>(arg[0], undefined, arg[1])
+      }
+
+      return this.postBiparamType<T>(arg[0], arg[1], arg[2])
     }
-    if (arg[1]) {
-      console.error('Expected 1 argument but 2 or more')
-      throw new Error('Expected 1 argument but 2 or more')
-    }
+    
     if (typeof arg[0] === 'object') {
 
-      return this.postUniparam<T>(arg[0])
+      return this.postUniparamType<T>(arg[0], arg[1])
     }
     throw new Error('first argument must be string or object')
   }
-  private postUniparam<T = any>(request: HttpRequestOptions): RequestResponse<T> {
+  private postUniparamType<T = any>(request: HttpRequestOptions, method: HttpMethod): RequestResponse<T> {
 
     const requestInit = FetchWrapper.getDefaultRequestInitBy({
-      method: HttpMethod.POST,
+      method,
       headers: request.headers,
     })
 
@@ -163,10 +168,10 @@ export default class FetchWrapper implements HttpInterface {
       },
     )
   }
-  private async postBiparam<T = any>(url: string, data: Data): RequestResponse<T> {
+  private async postBiparamType<T = any>(url: string, data: Data | undefined, method: HttpMethod): RequestResponse<T> {
 
     const requestInit = FetchWrapper.getDefaultRequestInitBy({
-      method: HttpMethod.POST,
+      method,
     })
 
     return this.request<T>(
@@ -178,31 +183,22 @@ export default class FetchWrapper implements HttpInterface {
     )
   }
 
-  delete<T = any>(url: string, requestData?: Data): RequestResponse<T> {
-
-    const requestInit = FetchWrapper.getDefaultRequestInitBy({
-      method: HttpMethod.DELETE,
-    })
-
-    return this.request<T>(
-      this.createFullUrl(url),
-      requestInit
-    )
+  delete<T = any>(request: HttpRequestOptions): RequestResponse<T>
+  delete<T = any>(
+    url: string,
+    requestInfo?: Data,
+  ): RequestResponse<T>
+  delete<T = any>(...arg: any): RequestResponse<T> {
+    return this.processPostOverloading<T>(...arg, HttpMethod.DELETE)
   }
 
-  put<T = any>(url: string, data?: Data): RequestResponse<T> {
-
-    const requestInit = FetchWrapper.getDefaultRequestInitBy({
-      method: HttpMethod.PUT
-    })
-
-    return this.request<T>(
-      this.createFullUrl(url),
-      {
-        ...requestInit,
-        data,
-      }
-    )
+  put<T = any>(request: HttpRequestOptions): RequestResponse<T>
+  put<T = any>(
+    url: string,
+    requestInfo?: Data,
+  ): RequestResponse<T>
+  put<T = any>(...arg: any): RequestResponse<T> {
+    return this.processPostOverloading<T>(...arg, HttpMethod.PUT)
   }
 
   request<T = any>(url: string, init: RequestInit & { data?: { [index: string]: any } }): RequestResponse<T> {
